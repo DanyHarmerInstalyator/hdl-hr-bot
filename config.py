@@ -9,3 +9,6 @@ if not BOT_TOKEN:
 
 # Для webhook режима (Render)
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
+
+# ID администраторов (опционально)
+ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x]

@@ -1,35 +1,3 @@
-# HDL HR Bot/
-# ├── __pycache                     
-# ├── .venv
-# ├── data
-# ├── documents 
-# ├── handlers/  
-#  └── __pycache__              
-# │   └── __init__.py
-# │   └── admin.py   
-# │   └── common.py              
-# │   └── onboarding.py  
-# ├── keyboards/ 
-#  └── __pycache__                  
-# │   └── __init__.py
-# │   └── reply.py               
-# │   └── inline.py 
-# ├── utils/                     
-# │   └── __init__.py
-# │   └── bitrix.py
-# ├── videos/                     
-# │   └──Hello.mp4
-#  ── .env 
-#  ── config_tasks.py
-#  ── config.py
-#  ── database.py                                        
-#  ── main.py 
-# ── requirements.txt                   
-# ── storage.py                                 
-# ── users.db
-
-
-# main.py
 import asyncio
 import os
 import logging
@@ -37,7 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from handlers import common, onboarding, admin
-from database import init_db
+from database import db  # Импортируем глобальный экземпляр db
 import config
 
 # Настройка логирования
@@ -47,12 +15,18 @@ logger = logging.getLogger(__name__)
 async def on_startup(bot: Bot):
     """Действия при запуске бота"""
     logger.info("Запуск бота...")
-    await bot.set_webhook(f"{config.WEBHOOK_URL}/webhook")
+    if config.WEBHOOK_URL:
+        await bot.set_webhook(f"{config.WEBHOOK_URL}/webhook")
+        logger.info(f"Webhook установлен: {config.WEBHOOK_URL}/webhook")
+    else:
+        logger.warning("WEBHOOK_URL не установлен, бот будет работать в polling режиме")
 
 async def on_shutdown(bot: Bot):
     """Действия при остановке бота"""
     logger.info("Остановка бота...")
-    await bot.delete_webhook()
+    if config.WEBHOOK_URL:
+        await bot.delete_webhook()
+        logger.info("Webhook удален")
 
 def create_app():
     """Создание aiohttp приложения"""
@@ -87,11 +61,10 @@ def create_app():
     return app
 
 if __name__ == "__main__":
-    # Инициализация базы данных
-    init_db()
+    # База данных уже инициализирована при создании экземпляра Database()
     logger.info("База данных инициализирована")
     
-    # Получение порта из переменных окружения (Render автоматически устанавливает)
+    # Получение порта из переменных окружения
     port = int(os.environ.get("PORT", 10000))
     
     # Запуск приложения
