@@ -2,7 +2,7 @@ from aiogram import Router, F, types
 from aiogram.types import CallbackQuery
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from utils.bitrix import get_task_checklist, get_task_checklist_details, get_task_deadline
-from storage import user_stage
+from storage import get_user_stage
 from keyboards.inline import get_stage_inline_keyboard
 from config_tasks import TASK_IDS, STAGE_TITLES
 
@@ -41,7 +41,7 @@ def get_all_blocks_completion(checklist_dict: dict):
 # --- Обработчик: "📂 Выбрать этап" ---
 @router.message(F.text == "📂 Выбрать этап")
 async def choose_stage(message: Message):
-    current_stage = user_stage.get(message.from_user.id, 1)
+    current_stage = get_user_stage(message.from_user.id)
     await message.answer(
         "Выберите этап для просмотра:",
         reply_markup=get_stage_inline_keyboard(max_stage=current_stage)
@@ -50,7 +50,7 @@ async def choose_stage(message: Message):
 # --- Обработчик: "✅ Проверить текущий этап" ---
 @router.message(F.text == "✅ Проверить текущий этап")
 async def check_current_stage(message: Message):
-    current = user_stage.get(message.from_user.id, 1)
+    current = get_user_stage(message.from_user.id)
 
     # --- Этап 1: проверка 5 блоков ---
     if current == 1:
@@ -61,18 +61,55 @@ async def check_current_stage(message: Message):
 
         completed_count, blocks = get_all_blocks_completion(checklist)
         if completed_count == 5:
-            user_stage[message.from_user.id] = 2
+            from storage import set_user_stage, mark_stage_completed, save_current_progress
+            mark_stage_completed(message.from_user.id, current)
+            set_user_stage(message.from_user.id, 2)
+            
+            # Получаем дедлайн для этапа 2
+            deadline = get_task_deadline(TASK_IDS[2])
+            deadline_text = f"⏰ Дедлайн этапа 2: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
+            
+            # Первое сообщение - поздравление
             await message.answer(
                 "✅ Все 5 блоков этапа 1 завершены!\n"
                 "🎉 Поздравляем! Теперь доступен <b>Этап 2: КВЕСТ-Адаптация</b>.",
                 parse_mode="HTML"
             )
+            
+            # Второе сообщение - ссылка и дедлайн
             await message.answer(
                 "🔗 <b>Ссылка на Этап 2:</b>\n"
-                "https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/79281/",
+                "https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/79281/\n\n"
+                f"{deadline_text}",
                 parse_mode="HTML"
             )
+            
+            # Третье сообщение - описание этапа
+            stage2_info = (
+                "🎯 <b>Этап 2: КВЕСТ-Адаптация</b>\n\n"
+                "В этом этапе вам предстоит:\n"
+                "• Познакомиться с коллегами\n"
+                "• Изучить рабочие процессы\n"
+                "• Пройти вводный инструктаж\n"
+                "• Получить доступы к системам\n\n"
+                "ℹ️ <i>Выполняйте задания по порядку и отмечайте их выполнение в чек-листе</i>"
+            )
+            await message.answer(stage2_info, parse_mode="HTML")
+            
         else:
+            from storage import save_current_progress
+            # Сохраняем прогресс в БД
+            completed_tasks = []
+            pending_tasks = []
+            
+            for b in blocks:
+                if b["completed"]:
+                    completed_tasks.append(f"Блок №{b['num']}")
+                else:
+                    pending_tasks.append(f"Блок №{b['num']}: {', '.join(b['missing'])}")
+            
+            save_current_progress(message.from_user.id, current, completed_tasks, pending_tasks)
+            
             report = []
             for b in blocks:
                 mark = "✅" if b["completed"] else "❌"
@@ -94,15 +131,31 @@ async def check_current_stage(message: Message):
             await message.answer(f"❌ Не удалось загрузить чек-лист этапа {current}.")
             return
 
+        from storage import set_user_stage, mark_stage_completed, save_current_progress
+        
+        # Сохраняем прогресс в БД
+        completed_tasks = [item["title"] for item in details if item["completed"]]
+        pending_tasks = [item["title"] for item in details if not item["completed"]]
+        
+        save_current_progress(message.from_user.id, current, completed_tasks, pending_tasks)
+        
         not_completed = [item for item in details if not item["completed"]]
         if not not_completed:
             # Успех
-            user_stage[message.from_user.id] = current + 1
+            mark_stage_completed(message.from_user.id, current)
+            
             if current == 6:
+                set_user_stage(message.from_user.id, 7)
                 await message.answer("🎉 Поздравляем! Вы успешно завершили всю адаптацию!")
             else:
                 next_stage = current + 1
+                set_user_stage(message.from_user.id, next_stage)
                 next_title = STAGE_TITLES[next_stage]
+                
+                # Получаем дедлайн для следующего этапа
+                deadline = get_task_deadline(TASK_IDS[next_stage])
+                deadline_text = f"⏰ Дедлайн этапа {next_stage}: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
+                
                 await message.answer(
                     f"✅ Этап {current} завершён!\n"
                     f"🎉 Доступен <b>Этап {next_stage}: {next_title}</b>.",
@@ -110,9 +163,63 @@ async def check_current_stage(message: Message):
                 )
                 await message.answer(
                     f"🔗 <b>Ссылка на Этап {next_stage}:</b>\n"
-                    f"https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/{TASK_IDS[next_stage]}/",
+                    f"https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/{TASK_IDS[next_stage]}/\n\n"
+                    f"{deadline_text}",
                     parse_mode="HTML"
                 )
+                
+                # Добавляем описание для конкретных этапов
+                if next_stage == 2:
+                    stage_info = (
+                        "🎯 <b>Этап 2: КВЕСТ-Адаптация</b>\n\n"
+                        "В этом этапе вам предстоит:\n"
+                        "• Познакомиться с коллегами\n"
+                        "• Изучить рабочие процессы\n"
+                        "• Пройти вводный инструктаж\n"
+                        "• Получить доступы к системам\n\n"
+                        "ℹ️ <i>Выполняйте задания по порядку и отмечайте их выполнение в чек-листе</i>"
+                    )
+                    await message.answer(stage_info, parse_mode="HTML")
+                elif next_stage == 3:
+                    stage_info = (
+                        "🎯 <b>Этап 3: WELCOME - ТРЕНИНГ.</b>\n\n"
+                        "В этом этапе вам предстоит:\n"
+                        "• Пройти Welcome-тренинг: История Группы компаний\n"
+                        "• Прочитать письма от собственника бизнеса\n\n"
+                        "ℹ️ <i>Выполняйте задания по порядку и отмечайте их выполнение в чек-листе</i>"
+                    )
+                    await message.answer(stage_info, parse_mode="HTML")
+                elif next_stage == 4:
+                    stage_info = (
+                        "🎯 <b>Этап 4: ОБУЧЕНИЕ</b>\n\n"
+                        "В этом этапе вам предстоит:\n"
+                        "• Пройти дистанционное обучение в Битрикс24\n"
+                        "• Изучить видеоуроки по работе с системой\n"
+                        "• Освоить основные бизнес-процессы компании\n\n"
+                        "ℹ️ <i>Обучение проходит в проекте 'ОБУЧЕНИЕ БИТРИКС24'</i>"
+                    )
+                    await message.answer(stage_info, parse_mode="HTML")
+                elif next_stage == 5:
+                    stage_info = (
+                        "🎯 <b>Этап 5: РЕГЛАМЕНТЫ ОТДЕЛА</b>\n\n"
+                        "В этом этапе вам предстоит:\n"
+                        "• Изучить регламенты, инструкции и скрипты отдела\n"
+                        "• Понять роль наставника в компании\n"
+                        "• Освоить внутренние процессы и правила\n\n"
+                        "ℹ️ <i>Внимательно изучите все документы вашего отдела</i>"
+                    )
+                    await message.answer(stage_info, parse_mode="HTML")
+                elif next_stage == 6:
+                    stage_info = (
+                        "🎯 <b>Этап 6: ИСПЫТАТЕЛЬНЫЙ СРОК</b>\n\n"
+                        "В этом этапе вам предстоит:\n"
+                        "• Подготовить отчет по результатам испытательного срока\n"
+                        "• Пройти оценку деятельности за период адаптации\n"
+                        "• Получить финальную обратную связь\n\n"
+                        "ℹ️ <i>Это завершающий этап вашей адаптации в компании</i>"
+                    )
+                    await message.answer(stage_info, parse_mode="HTML")
+                    
         else:
             # Ошибка — формируем отчёт
             report_lines = []
@@ -145,7 +252,7 @@ async def contact_hr(message: Message):
 # --- Обработчик: "📊 Мой прогресс" ---
 @router.message(F.text == "📊 Мой прогресс")
 async def show_progress(message: Message):
-    stage = user_stage.get(message.from_user.id, 1)
+    stage = get_user_stage(message.from_user.id)
     if stage == 1:
         checklist = get_task_checklist(TASK_IDS[1])
         if isinstance(checklist, dict):
@@ -157,6 +264,7 @@ async def show_progress(message: Message):
         await message.answer(f"📈 Текущий этап: {stage - 1} (завершён)\nСледующий: Этап {stage}")
     else:
         await message.answer("🎉 Адаптация полностью завершена!")
+
 # --- Обработчик нажатия на inline-кнопку этапа ---
 @router.callback_query(F.data.startswith("stage_"))
 async def handle_stage_inline(callback: CallbackQuery):
@@ -179,7 +287,7 @@ async def handle_stage_inline(callback: CallbackQuery):
         parse_mode="HTML"
     )
 
-    # 2. Только для этапа 1 — отправляем документы и дедлайн
+    # 2. Для этапа 1 — отправляем документы и дедлайн
     if stage == 1:
         deadline = get_task_deadline(task_id)
         deadline_text = f"⏰ Дедлайн этапа: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
@@ -187,32 +295,11 @@ async def handle_stage_inline(callback: CallbackQuery):
         docs_message = (
             f"{deadline_text}\n\n"
 
-            "📄 <b>Блок №1.1: Ознакомление с регламентом</b>\n"
-            '<a href="https://disk.360.yandex.ru/i/p4v8XQjs4mhAMg">Скачать Документ</a>\n\n'
-
             "📄 <b>Блок №1.2: Заполнить и подписать Заявление — согласие на обработку персональных данных</b>\n"
             '<a href="https://disk.360.yandex.ru/i/-qH3PaGWGpaOlQ">Скачать Документ</a>\n\n'
 
-            "📄 <b>Блок №2.1: Ознакомиться с Правилами внутреннего трудового распорядка (ПВТР)</b>\n"
-            '<a href="https://disk.360.yandex.ru/i/uNAVvUfhbaBiPQ">Скачать Документ</a>\n\n'
-
-            "📄 <b>Блок №2.2: Ознакомиться с Положением об оплате труда и премировании ред.1.</b>\n"
-            '<a href="https://disk.360.yandex.ru/i/tHULXrI-OqBRbA">Скачать Документ</a>\n\n'
-
-            "📄 <b>Блок №2.3: Ознакомиться с Положением о коммерческой тайне</b>\n"
-            '<a href="https://disk.360.yandex.ru/i/_A8aaf_ofv_CBQ">Скачать Документ</a>\n\n'
-
             "📄 <b>Блок №2.4: Подписать договор о неразглашении информации, являющейся коммерческой тайной в организации</b>\n"
             '<a href="https://disk.360.yandex.ru/i/gbNMIv88GaWRGQ">Скачать Документ</a>\n\n'
-
-            "📄 <b>Блок №2.5: Ознакомиться с Положением по охране труда</b>\n"
-            '<a href="https://disk.360.yandex.ru/i/g01IpK74R6FCHw">Скачать Документ</a>\n\n'
-
-            "📄 <b>Блок №2.6: Ознакомиться с Инструкцией об охране труда</b>\n"
-            '<a href="https://disk.360.yandex.ru/i/RQB50fx5k_ynaQ">Скачать Документ</a>\n\n'
-
-            "📄 <b>Блок №2.7: Ознакомиться с Положением о Этике и Дресс-код</b>\n"
-            '<a href="https://disk.360.yandex.ru/i/TNgXrA68TpDqXg">Скачать Документ</a>\n\n'
 
             "📄 <b>Блок №2.8: Подписать Лист ознакомления с ЛНА</b>\n"
             '<a href="https://disk.360.yandex.ru/i/mW50gaBs1yTuIw">Скачать Документ</a>\n\n'
@@ -221,28 +308,84 @@ async def handle_stage_inline(callback: CallbackQuery):
         )
         await callback.message.answer(docs_message, parse_mode="HTML")
 
+    # 3. Для этапа 2 — отправляем дедлайн и описание
+    elif stage == 2:
+        deadline = get_task_deadline(task_id)
+        deadline_text = f"⏰ Дедлайн этапа 2: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
+        
+        stage2_message = (
+            f"{deadline_text}\n\n"
+            "🎯 <b>Этап 2: КВЕСТ-Адаптация</b>\n\n"
+            "В этом этапе вам предстоит:\n"
+            "• Познакомиться с коллегами\n"
+            "• Изучить рабочие процессы\n"
+            "• Пройти вводный инструктаж\n"
+            "• Получить доступы к системам\n\n"
+            "ℹ️ <i>Выполняйте задания по порядку и отмечайте их выполнение в чек-листе</i>"
+        )
+        await callback.message.answer(stage2_message, parse_mode="HTML")
+
+    # 4. Для этапа 3 — отправляем дедлайн и описание
+    elif stage == 3:
+        deadline = get_task_deadline(task_id)
+        deadline_text = f"⏰ Дедлайн этапа 3: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
+        
+        stage3_message = (
+            f"{deadline_text}\n\n"
+            "🎯 <b>Этап 3: WELCOME - ТРЕНИНГ.</b>\n\n"
+            "В этом этапе вам предстоит:\n"
+            "• Пройти Welcome-тренинг: История Группы компаний\n"
+            "• Прочитать письма от собственника бизнеса\n\n"
+            "ℹ️ <i>Выполняйте задания по порядку и отмечайте их выполнение в чек-листе</i>"
+        )
+        await callback.message.answer(stage3_message, parse_mode="HTML")
+
+    # 5. Для этапа 4 — отправляем дедлайн и описание
+    elif stage == 4:
+        deadline = get_task_deadline(task_id)
+        deadline_text = f"⏰ Дедлайн этапа 4: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
+        
+        stage4_message = (
+            f"{deadline_text}\n\n"
+            "🎯 <b>Этап 4: ОБУЧЕНИЕ</b>\n\n"
+            "В этом этапе вам предстоит:\n"
+            "• Пройти дистанционное обучение в Битрикс24\n"
+            "• Изучить видеоуроки по работе с системой\n"
+            "• Освоить основные бизнес-процессы компании\n\n"
+            "ℹ️ <i>Обучение проходит в проекте 'ОБУЧЕНИЕ БИТРИКС24'</i>"
+        )
+        await callback.message.answer(stage4_message, parse_mode="HTML")
+
+    # 6. Для этапа 5 — отправляем дедлайн и описание
+    elif stage == 5:
+        deadline = get_task_deadline(task_id)
+        deadline_text = f"⏰ Дедлайн этапа 5: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
+        
+        stage5_message = (
+            f"{deadline_text}\n\n"
+            "🎯 <b>Этап 5: РЕГЛАМЕНТЫ ОТДЕЛА</b>\n\n"
+            "В этом этапе вам предстоит:\n"
+            "• Изучить регламенты, инструкции и скрипты отдела\n"
+            "• Понять роль наставника в компании\n"
+            "• Освоить внутренние процессы и правила\n\n"
+            "ℹ️ <i>Внимательно изучите все документы вашего отдела</i>"
+        )
+        await callback.message.answer(stage5_message, parse_mode="HTML")
+
+    # 7. Для этапа 6 — отправляем дедлайн и описание
+    elif stage == 6:
+        deadline = get_task_deadline(task_id)
+        deadline_text = f"⏰ Дедлайн этапа 6: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
+        
+        stage6_message = (
+            f"{deadline_text}\n\n"
+            "🎯 <b>Этап 6: ИСПЫТАТЕЛЬНЫЙ СРОК</b>\n\n"
+            "В этом этапе вам предстоит:\n"
+            "• Подготовить отчет по результатам испытательного срока\n"
+            "• Пройти оценку деятельности за период адаптации\n"
+            "• Получить финальную обратную связь\n\n"
+            "ℹ️ <i>Это завершающий этап вашей адаптации в компании</i>"
+        )
+        await callback.message.answer(stage6_message, parse_mode="HTML")
+
     await callback.answer()
-
-    # Отправляем доп. информацию только для этапа 1
-    # if stage == 1:
-    #     deadline = get_task_deadline(task_id)
-    #     deadline_text = f"⏰ Дедлайн этапа: Крайний срок: {deadline}" if deadline else "⏰ Дедлайн: не указан"
-
-    #     docs_text = (
-    #         f"{deadline_text}\n\n"
-    #         "📄 <b>Блок №1.1: Ознакомление с регламентом</b>\n"
-    #         '<a href="https://disk.360.yandex.ru/i/p4v8XQjs4mhAMg">Скачать Документ</a>\n\n'
-    #         "📄 <b>Блок №1.2: Заполнить и подписать Заявление — согласие на обработку персональных данных</b>\n"
-    #         '<a href="https://disk.360.yandex.ru/i/-qH3PaGWGpaOlQ">Скачать Документ</a>\n\n'
-    #         "ℹ️ <i>Все документы необходимо отсканировать и сохранить в комментариях к задаче в Битриксе на рабочем компьютере.</i>"
-    #     )
-    #     await callback.message.answer(docs_text, parse_mode="HTML")
-
-    # Всегда отправляем ссылку на задачу
-    task_url = f"https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/{task_id}/"
-    await callback.message.answer(
-        f"🔗 <b>Переход к задаче:</b>\n<a href='{task_url}'>Этап {stage}: {STAGE_TITLES[stage]}</a>",
-        parse_mode="HTML"
-    )
-
-    await callback.answer()  # убираем "часики" на кнопке        

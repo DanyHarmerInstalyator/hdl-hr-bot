@@ -1,39 +1,62 @@
-# hr_onboarding_bot/
-# ├── .venv/                     # виртуальное окружение (уже создано)
-# ├── .env                       # файл с секретами (токен бота)
-# ├── main.py                    # точка входа
-# ├── config.py                  # настройки (загрузка токена и т.п.)
-# ├── keyboards/                 # клавиатуры
+# HDL HR Bot/
+# ├── __pycache                     
+# ├── .venv
+# ├── data
+# ├── documents 
+# ├── handlers/  
+#  └── __pycache__              
 # │   └── __init__.py
-# │   └── reply.py               # reply-клавиатуры
-# │   └── inline.py              # inline-клавиатуры
-# ├── handlers/                  # обработчики команд и сообщений
+# │   └── admin.py   
+# │   └── common.py              
+# │   └── onboarding.py  
+# ├── keyboards/ 
+#  └── __pycache__                  
 # │   └── __init__.py
-# │   └── common.py              # базовые команды (start и т.д.)
-# │   └── onboarding.py          # этапы адаптации (в т.ч. "Ввод в должность")
-# ├── documents/                 # Word-документы для этапов
-# │   └── stage1_intro.docx      # пример документа для этапа 1
-# ├── utils/                     # вспомогательные функции (позже — интеграция с Bitrix24)
+# │   └── reply.py               
+# │   └── inline.py 
+# ├── utils/                     
 # │   └── __init__.py
-# └── requirements.txt           # зависимости
+# │   └── bitrix.py
+# ├── videos/                     
+# │   └──Hello.mp4
+#  ── .env 
+#  ── config_tasks.py
+#  ── config.py
+#  ── database.py                                        
+#  ── main.py 
+# ── requirements.txt                   
+# ── storage.py                                 
+# ── users.db
 
 
 # main.py
 import asyncio
 import logging
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 from config import BOT_TOKEN
-from handlers import common, onboarding
+from handlers import common, onboarding, admin
+from database import db
 
 # Включаем логирование
 logging.basicConfig(level=logging.INFO)
 
 async def main():
     logging.info("Запуск бота...")
+    
+    # Инициализируем бота и диспетчер
     bot = Bot(token=BOT_TOKEN)
-    dp = Dispatcher()
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
+    
+    # Регистрируем роутеры
     dp.include_router(common.router)
-    dp.include_router(onboarding.router) 
+    dp.include_router(onboarding.router)
+    dp.include_router(admin.router)  # Добавляем админ-панель
+    
+    # Инициализируем базу данных
+    db.init_db()
+    logging.info("База данных инициализирована")
 
     logging.info("Бот запущен и ожидает сообщения...")
     await bot.delete_webhook(drop_pending_updates=True)

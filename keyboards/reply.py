@@ -1,6 +1,7 @@
 # keyboards/reply.py
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
+
 def get_menu(stage: int = 1) -> ReplyKeyboardMarkup:
     keyboard = []
     

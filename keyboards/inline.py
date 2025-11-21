@@ -1,6 +1,14 @@
 # keyboards/inline.py
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+def get_continue_inline_keyboard() -> InlineKeyboardMarkup:
+    """Инлайн-кнопка Продолжить под видео"""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="▶️ Продолжить", callback_data="continue_onboarding")]
+        ]
+    )
+
 def get_stage_inline_keyboard(max_stage: int) -> InlineKeyboardMarkup:
     buttons = []
     for i in range(1, min(max_stage + 1, 7)):
