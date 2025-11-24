@@ -31,6 +31,7 @@
 
 # main.py
 import os
+import asyncio
 import logging
 from aiogram import Bot, Dispatcher
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
@@ -44,15 +45,11 @@ logger = logging.getLogger(__name__)
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{config.WEBHOOK_URL}{WEBHOOK_PATH}"
 
-async def on_bot_startup(bot: Bot):
-    logger.info(f"Установка webhook на {WEBHOOK_URL}")
+async def set_webhook(bot: Bot):
+    """Принудительно устанавливаем webhook при старте"""
+    logger.info(f"Устанавливаем webhook: {WEBHOOK_URL}")
     await bot.set_webhook(WEBHOOK_URL)
-    logger.info("✅ Webhook установлен")
-
-async def on_bot_shutdown(bot: Bot):
-    logger.info("Удаление webhook...")
-    await bot.delete_webhook(drop_pending_updates=True)
-    logger.info("✅ Webhook удалён")
+    logger.info("✅ Webhook успешно установлен")
 
 def main():
     bot = Bot(token=config.BOT_TOKEN)
@@ -61,23 +58,29 @@ def main():
     dp.include_router(onboarding.router)
     dp.include_router(admin.router)
 
-    # Явно регистрируем startup/shutdown с ботом
-    dp.startup.register(lambda: on_bot_startup(bot))
-    dp.shutdown.register(lambda: on_bot_shutdown(bot))
-
     app = web.Application()
 
-    # Регистрируем webhook-обработчик
+    # Регистрируем обработчик webhook
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
 
     # Health-check
-    async def health_check(request):
-        return web.Response(text="✅ Bot is running")
+    async def health(request):
+        return web.Response(text="✅ Bot is alive")
+    app.router.add_get("/", health)
 
-    app.router.add_get("/", health_check)
+    # Устанавливаем webhook после запуска приложения
+    async def on_startup(app):
+        await set_webhook(bot)
+
+    async def on_shutdown(app):
+        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.session.close()
+
+    app.on_startup.append(on_startup)
+    app.on_shutdown.append(on_shutdown)
 
     port = int(os.environ.get("PORT", 10000))
-    logger.info(f"Сервер запущен на порту {port}")
+    logger.info(f"Запуск сервера на порту {port}")
     web.run_app(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
