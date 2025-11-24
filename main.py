@@ -30,6 +30,7 @@
 
 
 # main.py
+# main.py
 import os
 import asyncio
 import logging
@@ -46,10 +47,23 @@ WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{config.WEBHOOK_URL}{WEBHOOK_PATH}"
 
 async def set_webhook(bot: Bot):
-    """Принудительно устанавливаем webhook при старте"""
-    logger.info(f"Устанавливаем webhook: {WEBHOOK_URL}")
-    await bot.set_webhook(WEBHOOK_URL)
-    logger.info("✅ Webhook успешно установлен")
+    """Установка вебхука с обработкой ошибок"""
+    try:
+        # Сначала удаляем старый вебхук
+        await bot.delete_webhook()
+        logger.info("✅ Старый вебхук удален")
+        
+        # Устанавливаем новый
+        result = await bot.set_webhook(WEBHOOK_URL)
+        logger.info(f"✅ Webhook установлен: {WEBHOOK_URL}, результат: {result}")
+        
+        # Проверяем установку
+        webhook_info = await bot.get_webhook_info()
+        logger.info(f"✅ Подтверждение: вебхук установлен на {webhook_info.url}")
+        logger.info(f"✅ Pending updates: {webhook_info.pending_update_count}")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка установки вебхука: {e}")
 
 def main():
     bot = Bot(token=config.BOT_TOKEN)
@@ -61,19 +75,30 @@ def main():
     app = web.Application()
 
     # Регистрируем обработчик webhook
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    webhook_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
+    webhook_handler.register(app, path=WEBHOOK_PATH)
 
     # Health-check
     async def health(request):
         return web.Response(text="✅ Bot is alive")
-    app.router.add_get("/", health)
+    
+    async def webhook_info(request):
+        webhook_info = await bot.get_webhook_info()
+        info_text = f"""
+        Webhook URL: {webhook_info.url}
+        Pending updates: {webhook_info.pending_update_count}
+        Has custom certificate: {webhook_info.has_custom_certificate}
+        """
+        return web.Response(text=info_text)
 
-    # Устанавливаем webhook после запуска приложения
+    app.router.add_get("/", health)
+    app.router.add_get("/webhook-info", webhook_info)
+
     async def on_startup(app):
         await set_webhook(bot)
 
     async def on_shutdown(app):
-        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.delete_webhook()
         await bot.session.close()
 
     app.on_startup.append(on_startup)
@@ -81,6 +106,9 @@ def main():
 
     port = int(os.environ.get("PORT", 10000))
     logger.info(f"Запуск сервера на порту {port}")
+    logger.info(f"WEBHOOK_URL из config: {config.WEBHOOK_URL}")
+    logger.info(f"Полный URL вебхука: {WEBHOOK_URL}")
+    
     web.run_app(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
