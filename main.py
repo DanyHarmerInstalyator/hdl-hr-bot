@@ -34,10 +34,9 @@ import asyncio
 import os
 import logging
 from aiogram import Bot, Dispatcher
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiogram.webhook.aiohttp_server import setup_application
 from aiohttp import web
 from handlers import common, onboarding, admin
-from database import db
 import config
 
 # Настройка логирования
@@ -49,60 +48,55 @@ async def on_startup(bot: Bot):
     logger.info("Запуск бота...")
     if config.WEBHOOK_URL:
         webhook_url = f"{config.WEBHOOK_URL}/webhook"
+        logger.info(f"Установка webhook на: {webhook_url}")
         await bot.set_webhook(webhook_url)
-        logger.info(f"Webhook установлен: {webhook_url}")
+        logger.info("Webhook успешно установлен")
     else:
-        logger.info("Бот работает в polling режиме")
+        logger.warning("WEBHOOK_URL не задан — бот не будет получать обновления на Render!")
 
 async def on_shutdown(bot: Bot):
     """Действия при остановке бота"""
     logger.info("Остановка бота...")
     if config.WEBHOOK_URL:
-        await bot.delete_webhook()
+        await bot.delete_webhook(drop_pending_updates=True)
         logger.info("Webhook удален")
 
-async def start_polling():
-    """Запуск бота в polling режиме"""
+def main():
+    # Инициализация
     bot = Bot(token=config.BOT_TOKEN)
     dp = Dispatcher()
-    
-    dp.include_router(common.router)
-    dp.include_router(onboarding.router)
-    dp.include_router(admin.router)
-    
-    logger.info("Бот запущен в polling режиме...")
-    await dp.start_polling(bot)
 
-def start_webhook():
-    """Запуск бота в webhook режиме"""
-    bot = Bot(token=config.BOT_TOKEN)
-    dp = Dispatcher()
-    
+    # Подключаем роутеры
     dp.include_router(common.router)
     dp.include_router(onboarding.router)
     dp.include_router(admin.router)
-    
+
+    # Регистрируем события
     dp.startup.register(on_startup)
     dp.shutdown.register(on_shutdown)
-    
+
+    # Создаём aiohttp приложение
     app = web.Application()
-    webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
-    webhook_requests_handler.register(app, path="/webhook")
-    
+
+    # Регистрируем Aiogram-приложение в aiohttp (автоматически добавляет /webhook)
+    setup_application(app, dp, bot=bot)
+
+    # Health-check для Render
     async def health_check(request):
-        return web.Response(text="Bot is running")
-    
+        return web.Response(text="✅ Bot is running on Render")
+
     app.router.add_get("/", health_check)
-    
+
+    # Получаем порт от Render
     port = int(os.environ.get("PORT", 10000))
-    logger.info(f"Бот запущен в webhook режиме на порту {port}")
+    logger.info(f"Запуск webhook-сервера на 0.0.0.0:{port}")
+
+    # Запуск
     web.run_app(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    logger.info("База данных инициализирована")
-    
-    # Автоматически выбираем режим
-    if config.WEBHOOK_URL:
-        start_webhook()
-    else:
-        asyncio.run(start_polling())
+    logger.info("Инициализация бота...")
+    if not config.WEBHOOK_URL:
+        logger.critical("Ошибка: WEBHOOK_URL не задан. На Render бот работает ТОЛЬКО в webhook-режиме.")
+        exit(1)
+    main()
