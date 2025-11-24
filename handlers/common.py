@@ -296,7 +296,7 @@ async def check_current_stage(message: Message):
             # Второе сообщение - ссылка и дедлайн
             await message.answer(
                 "🔗 <b>Ссылка на Этап 2:</b>\n"
-                "https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/79281/\n\n"
+                "https://hdl.bitrix24.ru/company/personal/user/4057/tasks/task/view/82127/\n\n"
                 f"{deadline_text}",
                 parse_mode="HTML"
             )
@@ -367,7 +367,7 @@ async def check_current_stage(message: Message):
                 )
                 await message.answer(
                     f"🔗 <b>Ссылка на Этап {next_stage}:</b>\n"
-                    f"https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/{TASK_IDS[next_stage]}/\n\n"
+                    f"https://hdl.bitrix24.ru/company/personal/user/4057/tasks/task/view/{TASK_IDS[next_stage]}/\n\n"
                     f"{deadline_text}",
                     parse_mode="HTML"
                 )
@@ -485,7 +485,7 @@ async def handle_stage_inline(callback: CallbackQuery):
         return
 
     # 1. Сначала — ссылка на задачу
-    task_url = f"https://hdl.bitrix24.ru/company/personal/user/1673/tasks/task/view/{task_id}/"
+    task_url = f"https://hdl.bitrix24.ru/company/personal/user/4057/tasks/task/view/{task_id}/"
     await callback.message.answer(
         f"🔗 <b>Переход к задаче:</b>\n<a href='{task_url}'>Этап {stage}: {STAGE_TITLES[stage]}</a>",
         parse_mode="HTML"
