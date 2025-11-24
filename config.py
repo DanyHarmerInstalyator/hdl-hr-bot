@@ -1,14 +1,7 @@
+# config.py
 import os
-from dotenv import load_dotenv
 
-load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN не найден в .env файле")
-
-# Для webhook режима (Render)
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "")
-
-# ID администраторов (опционально)
-ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x]
+BOT_TOKEN = os.environ["BOT_TOKEN"]  # упадёт с KeyError, если не задан
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL", "").rstrip("/")  # убираем лишний слеш
+ADMIN_IDS = [int(x) for x in os.environ.get("ADMIN_IDS", "").split(",") if x]
